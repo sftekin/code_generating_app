@@ -70,6 +70,36 @@ def read_coding_lib(code_dir, file_dict):
                 file_dict[file_name] = f.read()
 
 
+def generate_response(cursor: evadb.EvaDBCursor, question: str) -> str:
+    """Generates question response with llm.
+
+    Args:
+        cursor (EVADBCursor): evadb api cursor.
+        question (str): question to ask to llm.
+
+    Returns
+        str: response from llm.
+    """
+
+    if len(cursor.table("Transcript").select("text").df()["transcript.text"]) == 1:
+        return (
+            cursor.table("Transcript")
+            .select(f"ChatGPT('{question}', text)")
+            .df()["chatgpt.response"][0]
+        )
+    else:
+        # generate summary of the video if its too long
+        if not os.path.exists(SUMMARY_PATH):
+            generate_summary(cursor)
+
+        return (
+            cursor.table("Summary")
+            .select(f"ChatGPT('{question}', summary)")
+            .df()["chatgpt.response"][0]
+        )
+
+
+
 if __name__ == '__main__':
     # prompt = receive_prompt()
     #

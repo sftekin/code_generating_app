@@ -6,7 +6,7 @@ from helper import read_coding_lib
 
 DEFAULT_PROMPT_PATH = "default_prompts/password_generator/prompt"
 os.environ["OPENAI_API_KEY"] = \
-    os.environ.get("OPENAI_API_KEY", "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")
+    os.environ.get("OPENAI_API_KEY", "sk-111111111111111111111111111111111111")
 os.environ["OPENAI_KEY"] = os.environ["OPENAI_API_KEY"]
 
 

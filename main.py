@@ -2,14 +2,13 @@ import os
 import evadb
 import subprocess
 import pandas as pd
-
+from helper import read_coding_lib
 
 DEFAULT_PROMPT_PATH = "default_prompts/password_generator/prompt"
 os.environ["OPENAI_API_KEY"] = \
     os.environ.get("OPENAI_API_KEY", "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")
 os.environ["OPENAI_KEY"] = os.environ["OPENAI_API_KEY"]
 
-SUMMARY_PATH = os.path.join("temp", "summary.csv")
 
 def receive_prompt():
     # we will return the prompt str
@@ -52,7 +51,7 @@ def receive_prompt():
 
     # get OpenAI key if needed
     try:
-        api_key = os.environ["OPENAI_API_KEY"]
+        os.environ["OPENAI_API_KEY"]
     except KeyError:
         api_key = str(input("🔑 Enter your OpenAI key: "))
         os.environ["OPENAI_API_KEY"] = api_key
@@ -60,87 +59,105 @@ def receive_prompt():
     return prompt
 
 
-def read_coding_lib(code_dir, file_dict):
-    for file_name in os.listdir(code_dir):
-        file_path = f"{code_dir}/{file_name}"
-        if os.path.isdir(file_path):
-            read_coding_lib(code_dir=file_path, file_dict=file_dict)
-        else:
-            with open(file_path, "r") as f:
-                file_dict[file_name] = f.read()
-
-
-def generate_response(cursor: evadb.EvaDBCursor, question: str) -> str:
-    """Generates question response with llm.
-
-    Args:
-        cursor (EVADBCursor): evadb api cursor.
-        question (str): question to ask to llm.
-
-    Returns
-        str: response from llm.
-    """
-
-    if len(cursor.table("Transcript").select("text").df()["transcript.text"]) == 1:
-        return (
-            cursor.table("Transcript")
-            .select(f"ChatGPT('{question}', text)")
-            .df()["chatgpt.response"][0]
-        )
-    else:
-        # generate summary of the video if its too long
-        if not os.path.exists(SUMMARY_PATH):
-            generate_summary(cursor)
-
-        return (
-            cursor.table("Summary")
-            .select(f"ChatGPT('{question}', summary)")
-            .df()["chatgpt.response"][0]
-        )
-
-
-
-if __name__ == '__main__':
-    # prompt = receive_prompt()
-    #
-    # prompt_path = "temp/prompt"
-    # if not os.path.exists("temp"):
-    #     os.makedirs("temp")
-    #
-    # with open(prompt_path, "wb") as f:
-    #     f.write(prompt)
-
-    project_path = f"{os.getcwd()}/temp"
-    # print(f"Creating the project inside {project_path}")
-    # print("-*-*" * 30)
-    # command = ["gpt-engineer", "temp/"]
-    # proc = subprocess.run(command, text=True)
-
-    code_contents = {}
-    project_path = f"{project_path}/workspace"
-    read_coding_lib(code_dir=project_path, file_dict=code_contents)
-
-    # df = pd.DataFrame(code_contents, index=[0])
-
-    cursor = evadb.connect().cursor()
-    # a = cursor.query("SHOW FUNCTIONS;").df()
-    # print(a)
-
-    df = pd.DataFrame([{"summary": code_contents["all_output.txt"]}])
-
-    df.to_csv(SUMMARY_PATH)
-
-    cursor.drop_table("Summary", if_exists=True).execute()
-    cursor.query(
-        """CREATE TABLE IF NOT EXISTS Summary (summary TEXT(100));"""
-    ).execute()
-    cursor.load(SUMMARY_PATH, "Summary", "csv").execute()
-
-
+def summarize_project(cursor):
     generate_summary_rel = cursor.table("Summary").select(
         "ChatGPT('summarize in detail', summary)"
     )
     responses = generate_summary_rel.df()["chatgpt.response"]
     summary = " ".join(responses)
 
-    print()
+    print(summary)
+
+
+def generate_code(prompt, cursor):
+    # we will store the codes inside a temp folder
+    project_path = f"{os.getcwd()}/temp"
+    if not os.path.exists(project_path):
+        os.makedirs(project_path)
+        file_index = 1
+    else:
+        # temp exits get the file_index
+        file_indices = [int(file_name.split("-")[1])
+                        for file_name in os.listdir(project_path)]
+        file_index = sorted(file_indices)[-1] + 1
+
+    # write the prompt to a file in the temp directory
+    project_path = f"{project_path}/project-{file_index}"
+    os.makedirs(project_path)
+    prompt_path = f"{project_path}/prompt"
+    with open(prompt_path, "w") as f:
+        f.write(prompt)
+
+    # generate the code by calling gpt-engineer
+    print(f"Creating the project-{file_index} inside {project_path}")
+    print("-*-*" * 30)
+    command = ["gpt-engineer", project_path]
+    proc = subprocess.run(command, text=True)
+
+    # index the generated code into EvaDB
+    file_index = 2
+    project_path = f"{project_path}/project-{file_index}"
+    index_code(project_path, cursor)
+
+    return file_index
+
+
+def index_code(project_path, cursor):
+    project_id = int(os.path.basename(project_path).split("-")[1])
+    workspace_path = f"{project_path}/workspace"
+    code_contents = {}
+    read_coding_lib(code_dir=workspace_path, file_dict=code_contents)
+    data = {
+        "project_id": [project_id] * len(code_contents),
+        "file_names": list(code_contents.keys()),
+        "file_path": [project_path] * len(code_contents)
+    }
+    data_df = pd.DataFrame(data=data)
+    summary_df = pd.DataFrame([{"project_id": [project_id],
+                                "summary": code_contents["all_output.txt"]}])
+
+    cursor.query(
+        """CREATE TABLE IF NOT EXISTS Summary (project_id INTEGER, summary TEXT(1000));"""
+    ).execute()
+    summary_path = f"{project_path}/summary.csv"
+    summary_df.to_csv(summary_path)
+    cursor.load(summary_path, "Summary", "csv").execute()
+
+    cursor.query(
+        """CREATE TABLE IF NOT EXISTS Codes (project_id INTEGER, file_names TEXT(20), file_path TEXT(100));"""
+    ).execute()
+    data_path = f"{project_path}/data.csv"
+    data_df.to_csv(data_path)
+    cursor.load(data_path, "Codes", "csv").execute()
+
+
+
+def execute_code(project_id):
+    project_path = f"{os.getcwd()}/temp/project-{project_id}"
+
+    print(f"Executing the project-{project_id} inside {project_path}")
+    print("-*-*" * 30)
+    os.chdir(f"temp/project-{project_id}/workspace/")
+    command = ["chmod", "+x", "run.sh"]
+    proc = subprocess.run(command, text=True)
+
+    command = [f"./run.sh"]
+    proc = subprocess.run(command, text=True)
+
+
+def run():
+    cursor = evadb.connect().cursor()
+    prompt = "Develop a Pomodoro timer app using HTML, CSS, " \
+             "and JavaScript. Allow users to set work and break" \
+             " intervals and receive notifications when it's time to switch."
+
+    # interactive terminal asking for prompt
+    # receive_prompt()
+
+    project_id = generate_code(prompt=prompt, cursor=cursor)
+
+    execute_code(project_id=project_id)
+
+
+if __name__ == '__main__':
+    run()

@@ -1,2 +1,5 @@
 evadb
 pandas
+transformers
+'transformers[torch]'
+matplotlib

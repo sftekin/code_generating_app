@@ -21,33 +21,11 @@ def receive_prompt():
     print("Welcome to EvaDB, you can create any coding project on your local. "
           "\nYou only need to supply a prompt describing your coding project"
           " and an OpenAI API key.")
-    from_file = str(
+    prompt = str(
         input(
-            "Do you have a prompt located in a file "
-            "('yes' for local file/ 'no' for taking input now)"
+            "Enter the prompt describing your code. "
         )
-    ).lower() in ["y", "yes"]
-
-    if from_file:
-        prompt_path = str(
-            input(
-                "Enter the location of the local prompt file video "
-                "(press Enter to use our default prompt): "
-            )
-        )
-        if prompt_path == "":
-            prompt_path = DEFAULT_PROMPT_PATH
-
-        with open(prompt_path, "rb") as f:
-            prompt = f.read()
-
-    else:
-        prompt = str(
-            input(
-                "Enter the prompt describing your code. "
-                "(press Enter to use our default prompt): "
-            )
-        )
+    )
 
     # get OpenAI key if needed
     try:

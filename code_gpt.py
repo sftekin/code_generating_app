@@ -15,7 +15,6 @@
 
 
 import os
-import time
 
 import pandas as pd
 from retry import retry
@@ -27,7 +26,6 @@ from evadb.functions.decorators.io_descriptors.data_types import (
     PandasDataframe,
 )
 from evadb.utils.generic_utils import try_to_import_openai
-from tqdm import tqdm
 from gpt_engineer.core.ai import AI
 
 
@@ -146,6 +144,7 @@ class CodeGPT(AbstractFunction):
         from pathlib import Path
 
         project_path = queries[0]
+        mode = content[0]
 
         input_path = Path(project_path).absolute()
         print("Running gpt-engineer in", input_path, "\n")
@@ -171,12 +170,19 @@ class CodeGPT(AbstractFunction):
             azure_endpoint="",
         )
 
+        steps_dict = {
+            "mode-1": STEPS[StepsConfig.DEFAULT],
+            "mode-2": STEPS[StepsConfig.CLARIFY],
+            "mode-3": STEPS[StepsConfig.BENCHMARK]
+        }
+
         all_output = []
-        steps = STEPS[StepsConfig.DEFAULT]
+        steps = steps_dict[mode]
         for step in steps:
             messages = step(ai, dbs)
-            dbs.logs[step.__name__] = AI.serialize_messages(messages)
-            all_output.append(messages[-1].content.strip())
+            if messages:
+                dbs.logs[step.__name__] = AI.serialize_messages(messages)
+                all_output.append(messages[-1].content.strip())
         all_output_txt = "\n".join(all_output)
 
         with open(all_output_path, "w") as f:

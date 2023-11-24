@@ -3,6 +3,7 @@ import argparse
 import subprocess
 import glob
 import time
+import pickle as pkl
 
 import evadb
 from transformers import pipeline
@@ -11,7 +12,7 @@ from helper import read_all_prompts
 
 DEFAULT_PROMPT_PATH = "default_prompts/password_generator/prompt"
 os.environ["OPENAI_API_KEY"] = \
-    os.environ.get("OPENAI_API_KEY", "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")
+    os.environ.get("OPENAI_API_KEY", "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")
 os.environ["OPENAI_KEY"] = os.environ["OPENAI_API_KEY"]
 
 
@@ -65,6 +66,7 @@ class CodeGenerator:
         self.project_dir = f"{os.getcwd()}/temp"
         self.cursor = evadb.connect().cursor()
         self.run_mode = run_mode
+        self.table_created = False
         if reset:
             self.cursor.query("DROP TABLE IF EXISTS prompts;").execute()
 
@@ -91,8 +93,12 @@ class CodeGenerator:
                 project_id = int(project.split("-")[1])
                 query = f"INSERT INTO prompts (project_id, prompt) VALUES ({project_id}, \"({prompt})\");"
                 self.cursor.query(query).execute()
+            self.table_created = True
 
     def check_prompt_sim(self, input_prompt):
+        if not self.table_created:
+            return False, None
+
         table = self.cursor.query("SELECT project_id, prompt FROM prompts;").execute().frames
 
         comp_prompts = []
@@ -193,8 +199,7 @@ class CodeGenerator:
 
 def run(default_prompt, run_mode, loop_test=False):
     if loop_test:
-        assert run_mode == 2, "In loop test, the run mode must be 2"
-    code_generator = CodeGenerator(run_mode=run_mode)
+        assert run_mode == 3, "In loop test, the run mode must be 3"
 
     def_prompts = {}
     for prompt_dir in glob.glob("default_prompts/*"):
@@ -204,30 +209,35 @@ def run(default_prompt, run_mode, loop_test=False):
 
     if loop_test:
         exec_time = []
-        for i in range(10):
+        for i in range(5):
+            print(f"****** ITERATION {i} ******")
+            code_generator = CodeGenerator(run_mode=run_mode, reset=True)
             for prompt_name, prompt in def_prompts.items():
                 start_time = time.time()
                 code_generator.generate(prompt, ask_run=False)
                 exec_time.append(time.time() - start_time)
         print(exec_time)
-
-    if default_prompt:
-        prompt = def_prompts[default_prompt]
-        code_generator.generate(prompt)
+        with open("exec_time.pkl", "wb") as f:
+            pkl.dump(exec_time, f)
     else:
-        # interactive terminal asking for prompt
-        prompt = receive_prompt()
-        code_generator.generate(prompt)
+        code_generator = CodeGenerator(run_mode=run_mode, reset=True)
+        if default_prompt:
+            prompt = def_prompts[default_prompt]
+            code_generator.generate(prompt)
+        else:
+            # interactive terminal asking for prompt
+            prompt = receive_prompt()
+            code_generator.generate(prompt)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Welcome to CodeGPT, a bot creates a '
                                                  'coding project for you')
-    parser.add_argument('--default_prompt', type=str, default="",
+    parser.add_argument('--default_prompt', type=str, default="pomodoro_timer",
                         choices=['file_explorer', 'markdown_editor', 'currency_converter',
                                  'image_resizer', 'timer_app', 'pomodoro_timer', 'todo_list',
                                  'url_shortener', 'file_organizer', 'password_generator'])
-    parser.add_argument("--run_mode", type=int, choices=[1, 2, 3],
+    parser.add_argument("--run_mode", type=int, default=3, choices=[1, 2, 3],
                         help="1: Standard mode bot ask for review and execution at the end\n"
                              "2: Bot asks for further clarifications if it is not certain\n"
                              "3: No execution just generation")
